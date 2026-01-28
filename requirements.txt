@@ -1,0 +1,3 @@
+llama-cpp-python
+# To install with ROCm support, use:
+# CMAKE_ARGS="-DLLAMA_HIPBLAS=on" pip install llama-cpp-python
