@@ -139,6 +139,7 @@ class Qwen3GGUFNode:
     RETURN_NAMES = ("generated_text",)
     FUNCTION = "generate_text"
     CATEGORY = "LLM"
+    OUTPUT_NODE = True
 
     def generate_text(self, model_name, prompt, system_message, n_ctx, n_gpu_layers, n_threads, n_batch, 
                       temperature, top_p, top_k, max_tokens, repeat_penalty, seed, stop, keep_model_loaded):
