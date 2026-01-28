@@ -88,9 +88,16 @@ def run_workflow():
                 "repeat_penalty": 1.1,
                 "seed": -1,
                 "stop": "",
-                "keep_model_loaded": True
+                "keep_model_loaded": False
             },
             "class_type": "Qwen3GGUFNode"
+        },
+        "2": {
+            "inputs": {
+                "source": ["1", 0], # Connect to node 1's generated_text output
+                "previewMode": False # Show as text
+            },
+            "class_type": "PreviewAny"
         }
     }
 
@@ -188,28 +195,61 @@ def run_workflow():
         # Extract outputs from history
         outputs = history[prompt_id].get('outputs', {})
         
-        print("\n=== Execution Results ===")
-        if '1' in outputs:
+        print("\n=== Generated Text ===\n")
+        
+        # Try to get text from Preview node (node 2) first
+        if '2' in outputs:
+            preview_output = outputs['2']
+            # PreviewText node typically stores text in 'text' or 'string' key
+            if 'text' in preview_output:
+                text = preview_output['text']
+                if isinstance(text, (list, tuple)) and len(text) > 0:
+                    print(text[0])
+                elif isinstance(text, str):
+                    print(text)
+                else:
+                    print(str(text))
+            elif 'string' in preview_output:
+                text = preview_output['string']
+                if isinstance(text, (list, tuple)) and len(text) > 0:
+                    print(text[0])
+                elif isinstance(text, str):
+                    print(text)
+                else:
+                    print(str(text))
+            else:
+                # Fallback: try to get from the Qwen3GGUFNode directly
+                if '1' in outputs:
+                    node_output = outputs['1']
+                    if 'generated_text' in node_output:
+                        generated_text = node_output['generated_text']
+                        if isinstance(generated_text, (list, tuple)) and len(generated_text) > 0:
+                            print(generated_text[0])
+                        elif isinstance(generated_text, str):
+                            print(generated_text)
+                        else:
+                            print(str(generated_text))
+                    else:
+                        print("Preview node output keys: {}".format(list(preview_output.keys())))
+                else:
+                    print("Preview node output keys: {}".format(list(preview_output.keys())))
+        # Fallback to Qwen3GGUFNode output if Preview node not found
+        elif '1' in outputs:
             node_output = outputs['1']
             if 'generated_text' in node_output:
                 generated_text = node_output['generated_text']
                 if isinstance(generated_text, (list, tuple)) and len(generated_text) > 0:
-                    print("\nGenerated Text:")
                     print(generated_text[0])
                 elif isinstance(generated_text, str):
-                    print("\nGenerated Text:")
                     print(generated_text)
                 else:
-                    print("\nGenerated Text (raw):")
-                    print(generated_text)
+                    print(str(generated_text))
             else:
-                print("\nNode output keys: {}".format(list(node_output.keys())))
-                print("Full output: {}".format(json.dumps(node_output, indent=2)))
+                print("Error: Could not find text output.")
+                print("Node 1 output keys: {}".format(list(node_output.keys())))
         else:
-            print("\nNo output found for node '1'")
+            print("Error: No output found from nodes.")
             print("Available nodes in outputs: {}".format(list(outputs.keys())))
-            print("\nFull history:")
-            print(json.dumps(history, indent=2))
 
     except urllib.error.URLError as e:
         print("Error: Could not connect to ComfyUI HTTP API. Is it running on {}?".format(server_address))
