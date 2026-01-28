@@ -4,8 +4,9 @@ import json
 import urllib.request
 import urllib.parse
 import time
+import os
 
-server_address = "127.0.0.1:8188"
+server_address = os.environ.get("COMFYUI_SERVER_ADDRESS", "127.0.0.1:8188")
 client_id = str(uuid.uuid4())
 
 def queue_prompt(prompt):
