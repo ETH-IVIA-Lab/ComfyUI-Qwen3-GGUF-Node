@@ -1,105 +1,98 @@
-import sys
-import os
-import logging
-from unittest.mock import MagicMock
+import websocket # NOTE: websocket-client (pip install websocket-client)
+import uuid
+import json
+import urllib.request
+import urllib.parse
+import time
 
-# ==========================================
-# MOCKING COMFYUI ENVIRONMENT
-# ==========================================
-# Since this script runs outside of ComfyUI, we need to mock the 
-# 'folder_paths' module that the node expects.
+server_address = "127.0.0.1:8188"
+client_id = str(uuid.uuid4())
 
-mock_folder_paths = MagicMock()
-# Mock the get_folder_paths method to return a local 'models' directory
-mock_folder_paths.get_folder_paths.return_value = [os.path.abspath("models/llm")]
-mock_folder_paths.models_dir = os.path.abspath("models")
+def queue_prompt(prompt):
+    p = {"prompt": prompt, "client_id": client_id}
+    data = json.dumps(p).encode('utf-8')
+    req = urllib.request.Request("http://{}/prompt".format(server_address), data=data)
+    return json.loads(urllib.request.urlopen(req).read())
 
-# Inject the mock into sys.modules
-sys.modules["folder_paths"] = mock_folder_paths
+def get_history(prompt_id):
+    with urllib.request.urlopen("http://{}/history/{}".format(server_address, prompt_id)) as response:
+        return json.loads(response.read())
 
-# Add parent directory to sys.path so we can import nodes.py
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+def get_ws_messages():
+    ws = websocket.WebSocket()
+    ws.connect("ws://{}/ws?clientId={}".format(server_address, client_id))
+    return ws
 
-try:
-    from nodes import Qwen3GGUFNode
-except ImportError as e:
-    print(f"Error importing node: {e}")
-    sys.exit(1)
-
-# ==========================================
-# SETUP
-# ==========================================
-
-# Create a dummy model file for valid path checking if it doesn't exist
-# In a real scenario, you would have a real .gguf file here.
-os.makedirs("models/llm", exist_ok=True)
-dummy_model_name = "qwen3-test.gguf"
-dummy_model_path = os.path.join("models/llm", dummy_model_name)
-
-if not os.path.exists(dummy_model_path):
-    print(f"Creating dummy model file at {dummy_model_path} for testing path logic...")
-    with open(dummy_model_path, "wb") as f:
-        f.write(b"GGUF_DUMMY_HEADER")
-
-# ==========================================
-# DEMONSTRATION
-# ==========================================
-
-def run_demo():
-    print("Initializing Qwen3GGUFNode...")
-    node = Qwen3GGUFNode()
-
-    # Define inputs mimicking what ComfyUI would pass
-    inputs = {
-        "model_name": dummy_model_name,
-        "prompt": "Explain quantum computing in one sentence.",
-        "system_message": "You are a concise science educator.",
-        "n_ctx": 2048,
-        "n_gpu_layers": 0,  # 0 for CPU to be safe
-        "n_threads": 4,
-        "n_batch": 512,
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "top_k": 40,
-        "max_tokens": 100,
-        "repeat_penalty": 1.1,
-        "seed": 42,
-        "stop": "STOP,END",
-        "keep_model_loaded": False
+def run_workflow():
+    # Define the workflow
+    # Note: This requires the Qwen3 GGUF model to be present in ComfyUI/models/llm/
+    # You can change the model_name to match your actual file.
+    
+    workflow = {
+        "1": {
+            "inputs": {
+                "model_name": "qwen3-test.gguf",  # CHANGE THIS to your actual model filename
+                "prompt": "Why is the sky blue?",
+                "system_message": "You are a helpful assistant.",
+                "n_ctx": 2048,
+                "n_gpu_layers": 33,
+                "n_threads": 8,
+                "n_batch": 512,
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "top_k": 40,
+                "max_tokens": 100,
+                "repeat_penalty": 1.1,
+                "seed": -1,
+                "stop": "",
+                "keep_model_loaded": True
+            },
+            "class_type": "Qwen3GGUFNode"
+        }
     }
 
-    print("\n--- Input Parameters ---")
-    for k, v in inputs.items():
-        print(f"{k}: {v}")
-
-    print("\n--- Running Generation ---")
+    print("Connecting to ComfyUI at {}...".format(server_address))
+    ws = get_ws_messages()
+    
+    print("Queueing prompt...")
     try:
-        # Note: This will attempt to load the model via llama-cpp-python.
-        # Since we are using a dummy file, it will likely fail at the loading stage 
-        # unless we also mock Llama, but this demonstrates the workflow call.
+        prompt_id = queue_prompt(workflow)['prompt_id']
+        print("Prompt ID: {}".format(prompt_id))
         
-        # We Mock Llama for this demonstration to show success flow
-        # If you have a real model and llama-cpp-python installed, remove this mock block.
-        import nodes
-        if nodes.Llama is None:
-             print("llama-cpp-python not found, mocking Llama class for demonstration.")
-             mock_llama_instance = MagicMock()
-             mock_llama_instance.return_value = {"choices": [{"text": "Quantum computing uses quantum mechanics to process information."}]}
-             nodes.Llama = MagicMock(return_value=mock_llama_instance)
-        elif os.path.getsize(dummy_model_path) < 100: # It's our dummy file
-             print("Using dummy file, mocking Llama class for demonstration.")
-             mock_llama_instance = MagicMock()
-             mock_llama_instance.return_value = {"choices": [{"text": "Quantum computing uses quantum mechanics to process information."}]}
-             nodes.Llama = MagicMock(return_value=mock_llama_instance)
+        while True:
+            out = ws.recv()
+            if isinstance(out, str):
+                message = json.loads(out)
+                if message['type'] == 'executing':
+                    data = message['data']
+                    if data['node'] is None and data['prompt_id'] == prompt_id:
+                        print("Execution complete.")
+                        break
+                    elif data['prompt_id'] == prompt_id:
+                        print("Executing node: {}".format(data['node']))
+        
+        # Fetch history to get results (if any output was saved/returned)
+        history = get_history(prompt_id)
+        print("\nHistory:")
+        print(json.dumps(history, indent=2))
+        
+        # Since Qwen3GGUFNode is an OUTPUT_NODE, it runs.
+        # But it doesn't return UI output in the standard format unless we use a Preview node.
+        # However, the history might contain the output if it was an output node with results.
+        
+        outputs = history[prompt_id]['outputs']
+        if '1' in outputs:
+             node_output = outputs['1']
+             if 'generated_text' in node_output:
+                 print("\nGenerated Text:")
+                 print(node_output['generated_text'][0])
 
-        result = node.generate_text(**inputs)
-        
-        print("\n--- Output ---")
-        print(result[0])
-        print("--------------")
-        
+    except urllib.error.URLError:
+        print("Error: Could not connect to ComfyUI. Is it running on {}?".format(server_address))
     except Exception as e:
-        print(f"\nExecution failed as expected (if no real model): {e}")
+        print("Error: {}".format(e))
+    finally:
+        ws.close()
 
 if __name__ == "__main__":
-    run_demo()
+    run_workflow()
