@@ -230,3 +230,7 @@ This node supports all Qwen GGUF models available on [Hugging Face](https://hugg
 ## License
 
 MIT
+
+## Disclaimer
+
+This project was developed with the assistance of Cursor AI. While the code has been reviewed and tested, please be aware that AI-generated code may contain errors or require adjustments for your specific use case. Use at your own discretion and always review the code before deploying in production environments.
